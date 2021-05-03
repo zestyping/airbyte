@@ -1,4 +1,4 @@
-# Overview
+# Introduction
 
 ![GitHub Workflow Status](https://img.shields.io/github/workflow/status/airbytehq/airbyte/Airbyte%20CI) ![License](https://img.shields.io/github/license/airbytehq/airbyte)
 
@@ -32,7 +32,7 @@ docker-compose up
 
 Now visit [http://localhost:8000](http://localhost:8000)
 
-Here is a [step-by-step guide](docs/quickstart/getting-started.md) showing you how to load data from an API into a file, all on your computer.
+Here is a [step-by-step guide](https://github.com/airbytehq/airbyte/tree/2f3a1f0f74375da6c94f135ad9449baffc75e85c/docs/quickstart/getting-started.md) showing you how to load data from an API into a file, all on your computer.
 
 ## Features
 

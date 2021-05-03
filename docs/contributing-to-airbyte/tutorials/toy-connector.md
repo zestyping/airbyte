@@ -8,7 +8,7 @@ This tutorial walks you through building a simple Airbyte source to demonstrate 
 
 * [The Airbyte Specification](../../reference/architecture/airbyte-specification.md) and the interface implemented by a source connector
 * [The AirbyteCatalog](beginners-guide-to-catalog.md)
-* [Packaging your connector](../contributing-to-airbyte/building-new-connector/#1-implement--package-the-connector)
+* [Packaging your connector](https://github.com/airbytehq/airbyte/tree/2f3a1f0f74375da6c94f135ad9449baffc75e85c/docs/contributing-to-airbyte/contributing-to-airbyte/building-new-connector/README.md#1-implement--package-the-connector)
 * [Testing your connector](../building-new-connector/testing-connectors.md)
 
 At the end of this tutorial, you will have a working source that you will be able to use in the Airbyte UI.

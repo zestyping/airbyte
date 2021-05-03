@@ -1,4 +1,4 @@
-# Beginner's Guide to the AirbyteCatalog
+# A Beginner's Guide to the AirbyteCatlog
 
 ## Overview
 
