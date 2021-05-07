@@ -79,6 +79,7 @@ public class PostgresDestination extends AbstractJdbcDestination implements Dest
   }
 
   public static void main(String[] args) throws Exception {
+    LOGGER.info("I am a teapot destination");
     final Destination destination = new PostgresDestination();
     LOGGER.info("starting destination: {}", PostgresDestination.class);
     new IntegrationRunner(destination).run(args);
