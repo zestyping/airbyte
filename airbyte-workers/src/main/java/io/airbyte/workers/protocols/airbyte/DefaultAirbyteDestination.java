@@ -102,7 +102,7 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
 
     messageIterator = streamFactory.create(IOs.newBufferedReader(destinationProcess.getInputStream()))
         .peek(message -> heartbeatMonitor.beat())
-        .filter(message -> message.getType() == Type.RECORD || message.getType() == Type.STATE)
+        .filter(message -> message.getType() == Type.STATE)
         .iterator();
   }
 

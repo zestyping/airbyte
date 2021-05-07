@@ -138,8 +138,12 @@ public class DefaultReplicationWorker implements ReplicationWorker {
         sourceThread.start();
         destinationThread.start();
 
+        LOGGER.info("Waiting for source thread to join.");
         sourceThread.join();
+        LOGGER.info("Source thread complete.");
+        LOGGER.info("Waiting for destination thread to join.");
         destinationThread.join();
+        LOGGER.info("Destination thread complete.");
 
       } catch (Exception e) {
         throw new WorkerException("Sync worker failed.", e);
