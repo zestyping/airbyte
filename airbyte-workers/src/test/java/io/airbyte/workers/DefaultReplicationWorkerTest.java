@@ -27,6 +27,7 @@ package io.airbyte.workers;
 import static java.lang.Thread.sleep;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
@@ -80,6 +81,7 @@ class DefaultReplicationWorkerTest {
   private static final String FIELD_NAME = "favorite_color";
   private static final AirbyteMessage RECORD_MESSAGE1 = AirbyteMessageUtils.createRecordMessage(STREAM_NAME, FIELD_NAME, "blue");
   private static final AirbyteMessage RECORD_MESSAGE2 = AirbyteMessageUtils.createRecordMessage(STREAM_NAME, FIELD_NAME, "yellow");
+  private static final AirbyteMessage STATE_MESSAGE = AirbyteMessageUtils.createStateMessage("checkpoint", "1");
 
   private Path jobRoot;
   private AirbyteSource source;
@@ -118,8 +120,14 @@ class DefaultReplicationWorkerTest {
 
   @Test
   void test() throws Exception {
-    final ReplicationWorker worker =
-        new DefaultReplicationWorker(JOB_ID, JOB_ATTEMPT, source, mapper, destination, sourceMessageTracker, destinationMessageTracker);
+    final ReplicationWorker worker = new DefaultReplicationWorker(
+        JOB_ID,
+        JOB_ATTEMPT,
+        source,
+        mapper,
+        destination,
+        sourceMessageTracker,
+        destinationMessageTracker);
 
     worker.run(syncInput, jobRoot);
 
@@ -136,6 +144,7 @@ class DefaultReplicationWorkerTest {
   void testCancellation() throws InterruptedException {
     final AtomicReference<StandardSyncOutput> output = new AtomicReference<>();
     when(source.isFinished()).thenReturn(false);
+    when(destinationMessageTracker.getOutputState()).thenReturn(Optional.ofNullable(STATE_MESSAGE.getState().getData()));
 
     final ReplicationWorker worker = new DefaultReplicationWorker(
         JOB_ID,
@@ -164,7 +173,8 @@ class DefaultReplicationWorkerTest {
 
     worker.cancel();
     Assertions.assertTimeout(Duration.ofSeconds(5), (Executable) workerThread::join);
-    assertNotNull(output);
+    assertNotNull(output.get());
+    assertEquals(output.get().getState().getState(), STATE_MESSAGE.getState().getData());
   }
 
   @Test
@@ -173,7 +183,26 @@ class DefaultReplicationWorkerTest {
   }
 
   @Test
-  void testPopulatesOutputOnFailure() throws Exception {
+  void testPopulatesStateOnFailureIfAvailable() throws Exception {
+    doThrow(new IllegalStateException("induced exception")).when(source).close();
+    when(destinationMessageTracker.getOutputState()).thenReturn(Optional.ofNullable(STATE_MESSAGE.getState().getData()));
+
+    final ReplicationWorker worker = new DefaultReplicationWorker(
+        JOB_ID,
+        JOB_ATTEMPT,
+        source,
+        mapper,
+        destination,
+        sourceMessageTracker,
+        destinationMessageTracker);
+
+    final StandardSyncOutput output = worker.run(syncInput, jobRoot);
+    assertNotNull(output);
+    assertEquals(output.getState().getState(), STATE_MESSAGE.getState().getData());
+  }
+
+  @Test
+  void testDoesNotPopulatesStateOnFailureIfNotAvailable() throws Exception {
     doThrow(new IllegalStateException("induced exception")).when(source).close();
 
     final ReplicationWorker worker = new DefaultReplicationWorker(
@@ -184,7 +213,10 @@ class DefaultReplicationWorkerTest {
         destination,
         sourceMessageTracker,
         destinationMessageTracker);
-    assertThrows(WorkerException.class, () -> worker.run(syncInput, jobRoot));
+
+    final StandardSyncOutput output = worker.run(syncInput, jobRoot);
+    assertNotNull(output);
+    assertNull(output.getState());
   }
 
   @Test

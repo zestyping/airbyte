@@ -45,6 +45,10 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * If there is a state message available at the end of the worker (even if the status is a failure,
+ * that state should be retained.
+ */
 public class DefaultReplicationWorker implements ReplicationWorker {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(DefaultReplicationWorker.class);
@@ -58,6 +62,7 @@ public class DefaultReplicationWorker implements ReplicationWorker {
   private final MessageTracker<AirbyteMessage> destinationMessageTracker;
 
   private final AtomicBoolean cancelled;
+  private final AtomicBoolean hasFailed;
 
   public DefaultReplicationWorker(final String jobId,
                                   final int attempt,
@@ -75,9 +80,9 @@ public class DefaultReplicationWorker implements ReplicationWorker {
     this.destinationMessageTracker = destinationMessageTracker;
 
     this.cancelled = new AtomicBoolean(false);
+    this.hasFailed = new AtomicBoolean(false);
   }
 
-  @SuppressWarnings("OptionalIsPresent")
   @Override
   public StandardSyncOutput run(StandardSyncInput syncInput, Path jobRoot) throws WorkerException {
     LOGGER.info("start sync worker. job id: {} attempt id: {}", jobId, attempt);
@@ -146,11 +151,12 @@ public class DefaultReplicationWorker implements ReplicationWorker {
         LOGGER.info("Destination thread complete.");
 
       } catch (Exception e) {
-        throw new WorkerException("Sync worker failed.", e);
+        hasFailed.set(true);
+        LOGGER.error("Sync worker failed.", e);
       }
 
       final StandardSyncSummary summary = new StandardSyncSummary()
-          .withStatus(cancelled.get() ? Status.FAILED : Status.COMPLETED)
+          .withStatus(hasFailed.get() || cancelled.get() ? Status.FAILED : Status.COMPLETED)
           .withRecordsSynced(sourceMessageTracker.getRecordCount())
           .withBytesSynced(sourceMessageTracker.getBytesCount())
           .withStartTime(startTime)
@@ -162,11 +168,13 @@ public class DefaultReplicationWorker implements ReplicationWorker {
           .withStandardSyncSummary(summary)
           .withOutputCatalog(destinationConfig.getCatalog());
 
-      destinationMessageTracker.getOutputState().ifPresent(capturedState -> {
+      if (destinationMessageTracker.getOutputState().isPresent()) {
         final State state = new State()
-            .withState(capturedState);
+            .withState(destinationMessageTracker.getOutputState().get());
         output.withState(state);
-      });
+      } else {
+        LOGGER.warn("No state retained.");
+      }
 
       return output;
     } catch (Exception e) {
