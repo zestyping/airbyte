@@ -52,7 +52,7 @@ public class DefaultReplicationWorker implements ReplicationWorker {
   private final Source<AirbyteMessage> source;
   private final Mapper<AirbyteMessage> mapper;
   private final Destination<AirbyteMessage> destination;
-  private final MessageTracker<AirbyteMessage> messageTracker;
+  private final MessageTracker<AirbyteMessage> sourceMessageTracker;
 
   private final AtomicBoolean cancelled;
 
@@ -67,7 +67,7 @@ public class DefaultReplicationWorker implements ReplicationWorker {
     this.source = source;
     this.mapper = mapper;
     this.destination = destination;
-    this.messageTracker = messageTracker;
+    this.sourceMessageTracker = messageTracker;
 
     this.cancelled = new AtomicBoolean(false);
   }
@@ -89,27 +89,54 @@ public class DefaultReplicationWorker implements ReplicationWorker {
               s -> String.format("%s - %s", s.getSyncMode(), s.getDestinationSyncMode()))));
       final StandardTapConfig sourceConfig = WorkerUtils.syncToTapConfig(syncInput);
 
-      // note: resources are closed in the opposite order in which they are declared. thus source will be
-      // closed first (which is what we want).
+// note: resources are closed in the opposite order in which they are declared. thus source will be
+// closed first (which is what we want).
       try (destination; source) {
         destination.start(destinationConfig, jobRoot);
         source.start(sourceConfig, jobRoot);
 
-        while (!cancelled.get() && !source.isFinished()) {
-          final Optional<AirbyteMessage> maybeMessage = source.attemptRead();
-          if (maybeMessage.isPresent()) {
-            final AirbyteMessage message = mapper.mapMessage(maybeMessage.get());
+        final Thread sourceThread = new Thread(() -> {
+          try {
+            while (!cancelled.get() && !source.isFinished()) {
+              final Optional<AirbyteMessage> messageOptional = source.attemptRead();
+              if (messageOptional.isPresent()) {
+                final AirbyteMessage message = mapper.mapMessage(messageOptional.get());
 
-            messageTracker.accept(message);
-            destination.accept(message);
+                sourceMessageTracker.accept(message);
+                destination.accept(message);
+              }
+            }
+          } catch (Exception e) {
+            cancel();
+            throw new RuntimeException(e);
           }
-        }
+        });
+
+        final Thread destinationThread = new Thread(() -> {
+          try {
+            while (!cancelled.get() && !destination.isFinished()) {
+              final Optional<AirbyteMessage> messageOptional = destination.attemptRead();
+              if (messageOptional.isPresent()) {
+                destinationStateTracker.accept(messageOptional.get());
+              }
+            }
+          } catch (Exception e) {
+            cancel();
+            throw new RuntimeException(e);
+          }
+        });
+
+        sourceThread.join();
+        destinationThread.join();
+
+      } catch (Exception e) {
+        throw new WorkerException("Sync worker failed.", e);
       }
 
       final StandardSyncSummary summary = new StandardSyncSummary()
           .withStatus(cancelled.get() ? Status.FAILED : Status.COMPLETED)
-          .withRecordsSynced(messageTracker.getRecordCount())
-          .withBytesSynced(messageTracker.getBytesCount())
+          .withRecordsSynced(sourceMessageTracker.getRecordCount())
+          .withBytesSynced(sourceMessageTracker.getBytesCount())
           .withStartTime(startTime)
           .withEndTime(System.currentTimeMillis());
 
@@ -119,7 +146,7 @@ public class DefaultReplicationWorker implements ReplicationWorker {
           .withStandardSyncSummary(summary)
           .withOutputCatalog(destinationConfig.getCatalog());
 
-      messageTracker.getOutputState().ifPresent(capturedState -> {
+      sourceMessageTracker.getOutputState().ifPresent(capturedState -> {
         final State state = new State()
             .withState(capturedState);
         output.withState(state);
