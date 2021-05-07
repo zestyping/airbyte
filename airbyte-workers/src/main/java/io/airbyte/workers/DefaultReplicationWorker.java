@@ -24,6 +24,8 @@
 
 package io.airbyte.workers;
 
+import static java.lang.Thread.sleep;
+
 import io.airbyte.config.StandardSyncInput;
 import io.airbyte.config.StandardSyncOutput;
 import io.airbyte.config.StandardSyncSummary;
@@ -53,6 +55,7 @@ public class DefaultReplicationWorker implements ReplicationWorker {
   private final Mapper<AirbyteMessage> mapper;
   private final Destination<AirbyteMessage> destination;
   private final MessageTracker<AirbyteMessage> sourceMessageTracker;
+  private final MessageTracker<AirbyteMessage> destinationMessageTracker;
 
   private final AtomicBoolean cancelled;
 
@@ -61,17 +64,20 @@ public class DefaultReplicationWorker implements ReplicationWorker {
                                   final Source<AirbyteMessage> source,
                                   final Mapper<AirbyteMessage> mapper,
                                   final Destination<AirbyteMessage> destination,
-                                  final MessageTracker<AirbyteMessage> messageTracker) {
+                                  final MessageTracker<AirbyteMessage> sourceMessageTracker,
+                                  final MessageTracker<AirbyteMessage> destinationMessageTracker) {
     this.jobId = jobId;
     this.attempt = attempt;
     this.source = source;
     this.mapper = mapper;
     this.destination = destination;
-    this.sourceMessageTracker = messageTracker;
+    this.sourceMessageTracker = sourceMessageTracker;
+    this.destinationMessageTracker = destinationMessageTracker;
 
     this.cancelled = new AtomicBoolean(false);
   }
 
+  @SuppressWarnings("OptionalIsPresent")
   @Override
   public StandardSyncOutput run(StandardSyncInput syncInput, Path jobRoot) throws WorkerException {
     LOGGER.info("start sync worker. job id: {} attempt id: {}", jobId, attempt);
@@ -89,8 +95,8 @@ public class DefaultReplicationWorker implements ReplicationWorker {
               s -> String.format("%s - %s", s.getSyncMode(), s.getDestinationSyncMode()))));
       final StandardTapConfig sourceConfig = WorkerUtils.syncToTapConfig(syncInput);
 
-// note: resources are closed in the opposite order in which they are declared. thus source will be
-// closed first (which is what we want).
+      // note: resources are closed in the opposite order in which they are declared. thus source will be
+      // closed first (which is what we want).
       try (destination; source) {
         destination.start(destinationConfig, jobRoot);
         source.start(sourceConfig, jobRoot);
@@ -106,6 +112,7 @@ public class DefaultReplicationWorker implements ReplicationWorker {
                 destination.accept(message);
               }
             }
+            destination.notifyEndOfStream();
           } catch (Exception e) {
             cancel();
             throw new RuntimeException(e);
@@ -117,7 +124,9 @@ public class DefaultReplicationWorker implements ReplicationWorker {
             while (!cancelled.get() && !destination.isFinished()) {
               final Optional<AirbyteMessage> messageOptional = destination.attemptRead();
               if (messageOptional.isPresent()) {
-                destinationStateTracker.accept(messageOptional.get());
+                destinationMessageTracker.accept(messageOptional.get());
+              } else {
+                sleep(100);
               }
             }
           } catch (Exception e) {
@@ -125,6 +134,9 @@ public class DefaultReplicationWorker implements ReplicationWorker {
             throw new RuntimeException(e);
           }
         });
+
+        sourceThread.start();
+        destinationThread.start();
 
         sourceThread.join();
         destinationThread.join();
@@ -146,7 +158,7 @@ public class DefaultReplicationWorker implements ReplicationWorker {
           .withStandardSyncSummary(summary)
           .withOutputCatalog(destinationConfig.getCatalog());
 
-      sourceMessageTracker.getOutputState().ifPresent(capturedState -> {
+      destinationMessageTracker.getOutputState().ifPresent(capturedState -> {
         final State state = new State()
             .withState(capturedState);
         output.withState(state);

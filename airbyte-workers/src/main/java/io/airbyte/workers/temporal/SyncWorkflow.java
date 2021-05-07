@@ -179,6 +179,7 @@ public interface SyncWorkflow {
             airbyteSource,
             new NamespacingMapper(syncInput.getPrefix()),
             new DefaultAirbyteDestination(destinationLauncher),
+            new AirbyteMessageTracker(),
             new AirbyteMessageTracker());
       };
     }

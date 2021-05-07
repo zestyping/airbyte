@@ -49,7 +49,6 @@ import io.airbyte.config.StandardTargetConfig;
 import io.airbyte.config.State;
 import io.airbyte.protocol.models.AirbyteMessage;
 import io.airbyte.validation.json.JsonSchemaValidator;
-import io.airbyte.workers.protocols.MessageTracker;
 import io.airbyte.workers.protocols.airbyte.AirbyteDestination;
 import io.airbyte.workers.protocols.airbyte.AirbyteMessageTracker;
 import io.airbyte.workers.protocols.airbyte.AirbyteMessageUtils;
@@ -89,6 +88,8 @@ class DefaultReplicationWorkerTest {
   private StandardSyncInput syncInput;
   private StandardTapConfig sourceConfig;
   private StandardTargetConfig destinationConfig;
+  private AirbyteMessageTracker sourceMessageTracker;
+  private AirbyteMessageTracker destinationMessageTracker;
 
   @SuppressWarnings("unchecked")
   @BeforeEach
@@ -104,8 +105,11 @@ class DefaultReplicationWorkerTest {
     source = mock(AirbyteSource.class);
     mapper = mock(NamespacingMapper.class);
     destination = mock(AirbyteDestination.class);
+    sourceMessageTracker = mock(AirbyteMessageTracker.class);
+    destinationMessageTracker = mock(AirbyteMessageTracker.class);
 
     when(source.isFinished()).thenReturn(false, false, false, true);
+    when(destination.isFinished()).thenReturn(false, false, false, true);
     when(source.attemptRead()).thenReturn(Optional.of(RECORD_MESSAGE1), Optional.empty(), Optional.of(RECORD_MESSAGE2));
     when(mapper.mapCatalog(destinationConfig.getCatalog())).thenReturn(destinationConfig.getCatalog());
     when(mapper.mapMessage(RECORD_MESSAGE1)).thenReturn(RECORD_MESSAGE1);
@@ -114,7 +118,8 @@ class DefaultReplicationWorkerTest {
 
   @Test
   void test() throws Exception {
-    final ReplicationWorker worker = new DefaultReplicationWorker(JOB_ID, JOB_ATTEMPT, source, mapper, destination, new AirbyteMessageTracker());
+    final ReplicationWorker worker =
+        new DefaultReplicationWorker(JOB_ID, JOB_ATTEMPT, source, mapper, destination, sourceMessageTracker, destinationMessageTracker);
 
     worker.run(syncInput, jobRoot);
 
@@ -126,14 +131,21 @@ class DefaultReplicationWorkerTest {
     verify(destination).close();
   }
 
-  @SuppressWarnings({"BusyWait", "unchecked"})
+  @SuppressWarnings({"BusyWait"})
   @Test
   void testCancellation() throws InterruptedException {
     final AtomicReference<StandardSyncOutput> output = new AtomicReference<>();
-    final MessageTracker<AirbyteMessage> messageTracker = mock(MessageTracker.class);
     when(source.isFinished()).thenReturn(false);
 
-    final ReplicationWorker worker = new DefaultReplicationWorker(JOB_ID, JOB_ATTEMPT, source, mapper, destination, messageTracker);
+    final ReplicationWorker worker = new DefaultReplicationWorker(
+        JOB_ID,
+        JOB_ATTEMPT,
+        source,
+        mapper,
+        destination,
+        sourceMessageTracker,
+        destinationMessageTracker);
+
     final Thread workerThread = new Thread(() -> {
       try {
         output.set(worker.run(syncInput, jobRoot));
@@ -145,7 +157,7 @@ class DefaultReplicationWorkerTest {
     workerThread.start();
 
     // verify the worker is actually running before we kill it.
-    while (Mockito.mockingDetails(messageTracker).getInvocations().size() < 5) {
+    while (Mockito.mockingDetails(sourceMessageTracker).getInvocations().size() < 5) {
       LOGGER.info("waiting for worker to start running");
       sleep(100);
     }
@@ -160,35 +172,50 @@ class DefaultReplicationWorkerTest {
     testPopulatesOutput();
   }
 
-  @SuppressWarnings("unchecked")
   @Test
   void testPopulatesOutputOnFailure() throws Exception {
-    final MessageTracker<AirbyteMessage> messageTracker = mock(MessageTracker.class);
     doThrow(new IllegalStateException("induced exception")).when(source).close();
 
-    final ReplicationWorker worker = new DefaultReplicationWorker(JOB_ID, JOB_ATTEMPT, source, mapper, destination, messageTracker);
+    final ReplicationWorker worker = new DefaultReplicationWorker(
+        JOB_ID,
+        JOB_ATTEMPT,
+        source,
+        mapper,
+        destination,
+        sourceMessageTracker,
+        destinationMessageTracker);
     assertThrows(WorkerException.class, () -> worker.run(syncInput, jobRoot));
   }
 
-  @SuppressWarnings("unchecked")
   @Test
   void testDoesNotPopulateOnIrrecoverableFailure() {
-    final MessageTracker<AirbyteMessage> messageTracker = mock(MessageTracker.class);
-    doThrow(new IllegalStateException("induced exception")).when(messageTracker).getRecordCount();
+    doThrow(new IllegalStateException("induced exception")).when(sourceMessageTracker).getRecordCount();
 
-    final ReplicationWorker worker = new DefaultReplicationWorker(JOB_ID, JOB_ATTEMPT, source, mapper, destination, messageTracker);
+    final ReplicationWorker worker = new DefaultReplicationWorker(
+        JOB_ID,
+        JOB_ATTEMPT,
+        source,
+        mapper,
+        destination,
+        sourceMessageTracker,
+        destinationMessageTracker);
     assertThrows(WorkerException.class, () -> worker.run(syncInput, jobRoot));
   }
 
-  @SuppressWarnings("unchecked")
   private void testPopulatesOutput() throws WorkerException {
-    final MessageTracker<AirbyteMessage> messageTracker = mock(MessageTracker.class);
     final JsonNode expectedState = Jsons.jsonNode(ImmutableMap.of("updated_at", 10L));
-    when(messageTracker.getRecordCount()).thenReturn(12L);
-    when(messageTracker.getBytesCount()).thenReturn(100L);
-    when(messageTracker.getOutputState()).thenReturn(Optional.of(expectedState));
+    when(sourceMessageTracker.getRecordCount()).thenReturn(12L);
+    when(sourceMessageTracker.getBytesCount()).thenReturn(100L);
+    when(destinationMessageTracker.getOutputState()).thenReturn(Optional.of(expectedState));
 
-    final ReplicationWorker worker = new DefaultReplicationWorker(JOB_ID, JOB_ATTEMPT, source, mapper, destination, messageTracker);
+    final ReplicationWorker worker = new DefaultReplicationWorker(
+        JOB_ID,
+        JOB_ATTEMPT,
+        source,
+        mapper,
+        destination,
+        sourceMessageTracker,
+        destinationMessageTracker);
 
     final StandardSyncOutput actual = worker.run(syncInput, jobRoot);
     final StandardSyncOutput expectedSyncOutput = new StandardSyncOutput()

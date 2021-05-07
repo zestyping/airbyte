@@ -31,6 +31,7 @@ import io.airbyte.commons.io.LineGobbler;
 import io.airbyte.commons.json.Jsons;
 import io.airbyte.config.StandardTargetConfig;
 import io.airbyte.protocol.models.AirbyteMessage;
+import io.airbyte.protocol.models.AirbyteMessage.Type;
 import io.airbyte.workers.WorkerConstants;
 import io.airbyte.workers.WorkerException;
 import io.airbyte.workers.WorkerUtils;
@@ -39,7 +40,12 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
+import java.util.Iterator;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,14 +53,34 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(DefaultAirbyteDestination.class);
 
+  private static final Duration HEARTBEAT_FRESH_DURATION = Duration.of(5, ChronoUnit.MINUTES);
+  private static final Duration CHECK_HEARTBEAT_DURATION = Duration.of(10, ChronoUnit.SECONDS);
+  // todo (cgardens) - keep the graceful shutdown consistent with current behavior for release. make
+  // sure everything is working well before we reduce this to something more reasonable.
+  private static final Duration GRACEFUL_SHUTDOWN_DURATION = Duration.of(10, ChronoUnit.HOURS);
+  private static final Duration FORCED_SHUTDOWN_DURATION = Duration.of(1, ChronoUnit.MINUTES);
+
   private final IntegrationLauncher integrationLauncher;
+  private final AirbyteStreamFactory streamFactory;
+  private final HeartbeatMonitor heartbeatMonitor;
+
+  private final AtomicBoolean endOfStream = new AtomicBoolean(false);
 
   private Process destinationProcess = null;
   private BufferedWriter writer = null;
-  private boolean endOfStream = false;
+  private Iterator<AirbyteMessage> messageIterator = null;
 
   public DefaultAirbyteDestination(final IntegrationLauncher integrationLauncher) {
+    this(integrationLauncher, new DefaultAirbyteStreamFactory(), new HeartbeatMonitor(HEARTBEAT_FRESH_DURATION));
+
+  }
+
+  public DefaultAirbyteDestination(final IntegrationLauncher integrationLauncher,
+                                   final AirbyteStreamFactory streamFactory,
+                                   final HeartbeatMonitor heartbeatMonitor) {
     this.integrationLauncher = integrationLauncher;
+    this.streamFactory = streamFactory;
+    this.heartbeatMonitor = heartbeatMonitor;
   }
 
   @Override
@@ -73,11 +99,16 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
     LineGobbler.gobble(destinationProcess.getErrorStream(), LOGGER::error);
 
     writer = new BufferedWriter(new OutputStreamWriter(destinationProcess.getOutputStream(), Charsets.UTF_8));
+
+    messageIterator = streamFactory.create(IOs.newBufferedReader(destinationProcess.getInputStream()))
+        .peek(message -> heartbeatMonitor.beat())
+        .filter(message -> message.getType() == Type.RECORD || message.getType() == Type.STATE)
+        .iterator();
   }
 
   @Override
   public void accept(AirbyteMessage message) throws IOException {
-    Preconditions.checkState(destinationProcess != null && !endOfStream);
+    Preconditions.checkState(destinationProcess != null && !endOfStream.get());
 
     writer.write(Jsons.serialize(message));
     writer.newLine();
@@ -85,11 +116,11 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
 
   @Override
   public void notifyEndOfStream() throws IOException {
-    Preconditions.checkState(destinationProcess != null && !endOfStream);
+    Preconditions.checkState(destinationProcess != null && !endOfStream.get());
 
     writer.flush();
     writer.close();
-    endOfStream = true;
+    endOfStream.set(true);
   }
 
   @Override
@@ -98,7 +129,7 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
       return;
     }
 
-    if (!endOfStream) {
+    if (!endOfStream.get()) {
       notifyEndOfStream();
     }
 
@@ -120,6 +151,20 @@ public class DefaultAirbyteDestination implements AirbyteDestination {
       WorkerUtils.cancelProcess(destinationProcess);
       LOGGER.info("Cancelled destination process!");
     }
+  }
+
+  @Override
+  public boolean isFinished() {
+    Preconditions.checkState(destinationProcess != null);
+
+    return !destinationProcess.isAlive() && !messageIterator.hasNext();
+  }
+
+  @Override
+  public Optional<AirbyteMessage> attemptRead() {
+    Preconditions.checkState(destinationProcess != null);
+
+    return Optional.ofNullable(messageIterator.hasNext() ? messageIterator.next() : null);
   }
 
 }
