@@ -96,7 +96,8 @@ public class TemporalClient {
         .withDockerImage(config.getDockerImage());
     final StandardDiscoverCatalogInput input = new StandardDiscoverCatalogInput().withConnectionConfiguration(config.getConnectionConfiguration());
 
-    return execute(jobRunConfig, () -> getWorkflowStub(DiscoverCatalogWorkflow.class, TemporalJobType.DISCOVER_SCHEMA).run(jobRunConfig, launcherConfig, input));
+    return execute(jobRunConfig,
+        () -> getWorkflowStub(DiscoverCatalogWorkflow.class, TemporalJobType.DISCOVER_SCHEMA).run(jobRunConfig, launcherConfig, input));
   }
 
   public TemporalResponse<StandardSyncOutput> submitSync(long jobId, int attempt, JobSyncConfig config) {
@@ -135,12 +136,12 @@ public class TemporalClient {
       throw new RuntimeException(e);
     }
 
-//    return execute(jobRunConfig,
-//        () -> getWorkflowStub(SyncWorkflow.class, TemporalJobType.SYNC).run(
-//            jobRunConfig,
-//            sourceLauncherConfig,
-//            destinationLauncherConfig,
-//            input));
+    // return execute(jobRunConfig,
+    // () -> getWorkflowStub(SyncWorkflow.class, TemporalJobType.SYNC).run(
+    // jobRunConfig,
+    // sourceLauncherConfig,
+    // destinationLauncherConfig,
+    // input));
   }
 
   private <T> T getWorkflowStub(Class<T> workflowClass, TemporalJobType jobType) {

@@ -24,8 +24,6 @@
 
 package io.airbyte.workers.temporal;
 
-import io.airbyte.workers.WorkerException;
-import io.airbyte.workers.temporal.CancellationHandler.TemporalCancellationHandler;
 import io.temporal.activity.ActivityCancellationType;
 import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityMethod;
@@ -40,12 +38,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @WorkflowInterface
-public interface TestWorkflow {
+public interface TestWorkflow2 {
 
   @WorkflowMethod
-  String run();
+  String run(String arg);
 
-  class WorkflowImpl implements TestWorkflow {
+  class WorkflowImpl implements TestWorkflow2 {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(WorkflowImpl.class);
 
@@ -59,7 +57,7 @@ public interface TestWorkflow {
     private final Activity2 activity2 = Workflow.newActivityStub(Activity2.class, options);
 
     @Override
-    public String run() {
+    public String run(String arg) {
       final String s1 = activity1.activity1();
       final String s2 = activity2.activity2();
 
@@ -91,24 +89,8 @@ public interface TestWorkflow {
     public String activity1() {
       final String s = "activity1";
       LOGGER.info("before: {}", s);
-      countDownLatch.countDown();
-      final CountDownLatch internalLatch = new CountDownLatch(1);
-      final TemporalCancellationHandler temporalCancellationHandler = new TemporalCancellationHandler();
-      while (internalLatch.getCount() > 0) {
-        LOGGER.info("waiting");
-        try {
-          temporalCancellationHandler.checkAndHandleCancellation(() -> {
-            LOGGER.info("cancelling!!!");
-            internalLatch.countDown();
-          });
-        } catch (WorkerException e) {
-          throw new RuntimeException(e);
-        }
-        // Workflow.sleep(10);
-      }
       thrower.accept(s);
       LOGGER.info("after: {}", s);
-      //
       return s;
     }
 
