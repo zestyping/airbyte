@@ -52,11 +52,12 @@ import java.util.function.Consumer;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 // based of example in temporal samples:
 // https://github.com/temporalio/samples-java/blob/master/src/test/java/io/temporal/samples/hello/HelloActivityTest.java
-// @Disabled
+@Disabled
 class TemporalWorkflowTest {
 
   private static final String TASK_QUEUE = "a";

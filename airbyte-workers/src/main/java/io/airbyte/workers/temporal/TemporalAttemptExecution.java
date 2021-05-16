@@ -59,14 +59,14 @@ public class TemporalAttemptExecution<INPUT, OUTPUT> implements Supplier<OUTPUT>
 
   public static String WORKFLOW_ID_FILENAME = "WORKFLOW_ID";
 
-  private final Path jobRoot;
-  private final CheckedSupplier<Worker<INPUT, OUTPUT>, Exception> workerSupplier;
-  private final Supplier<INPUT> inputSupplier;
-  private final String jobId;
-  private final BiConsumer<Path, String> mdcSetter;
-  private final CheckedConsumer<Path, IOException> jobRootDirCreator;
-  private final CancellationHandler cancellationHandler;
-  private final Supplier<String> workflowIdProvider;
+  protected final Path jobRoot;
+  protected final CheckedSupplier<Worker<INPUT, OUTPUT>, Exception> workerSupplier;
+  protected final Supplier<INPUT> inputSupplier;
+  protected final String jobId;
+  protected final BiConsumer<Path, String> mdcSetter;
+  protected final CheckedConsumer<Path, IOException> jobRootDirCreator;
+  protected final CancellationHandler cancellationHandler;
+  protected final Supplier<String> workflowIdProvider;
 
   public TemporalAttemptExecution(Path workspaceRoot,
                                   JobRunConfig jobRunConfig,
@@ -139,7 +139,7 @@ public class TemporalAttemptExecution<INPUT, OUTPUT> implements Supplier<OUTPUT>
     }
   }
 
-  private Thread getWorkerThread(Worker<INPUT, OUTPUT> worker, CompletableFuture<OUTPUT> outputFuture) {
+  protected Thread getWorkerThread(Worker<INPUT, OUTPUT> worker, CompletableFuture<OUTPUT> outputFuture) {
     return new Thread(() -> {
       mdcSetter.accept(jobRoot, jobId);
 

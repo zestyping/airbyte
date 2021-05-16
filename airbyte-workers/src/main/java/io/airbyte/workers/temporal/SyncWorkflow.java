@@ -32,6 +32,7 @@ import io.airbyte.config.ConfigSchema;
 import io.airbyte.config.NormalizationInput;
 import io.airbyte.config.StandardSyncInput;
 import io.airbyte.config.StandardSyncOutput;
+import io.airbyte.config.StandardSyncSummary.Status;
 import io.airbyte.scheduler.models.IntegrationLauncherConfig;
 import io.airbyte.scheduler.models.JobRunConfig;
 import io.airbyte.workers.DefaultNormalizationWorker;
@@ -57,6 +58,8 @@ import io.temporal.workflow.WorkflowInterface;
 import io.temporal.workflow.WorkflowMethod;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,7 +77,7 @@ public interface SyncWorkflow {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(WorkflowImpl.class);
 
-    private final ActivityOptions options = ActivityOptions.newBuilder()
+    private static final ActivityOptions options = ActivityOptions.newBuilder()
         .setScheduleToCloseTimeout(Duration.ofDays(3))
         .setCancellationType(ActivityCancellationType.WAIT_CANCELLATION_COMPLETED)
         .setRetryOptions(TemporalUtils.NO_RETRY)
@@ -116,6 +119,8 @@ public interface SyncWorkflow {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ReplicationActivityImpl.class);
 
+    private static final int MAX_RETRIES = 3;
+
     private final ProcessBuilderFactory pbf;
     private final Path workspaceRoot;
     private final AirbyteConfigValidator validator;
@@ -141,12 +146,24 @@ public interface SyncWorkflow {
         return syncInput;
       };
 
-      final TemporalAttemptExecution<StandardSyncInput, StandardSyncOutput> temporalAttemptExecution = new TemporalAttemptExecution<>(
-          workspaceRoot,
-          jobRunConfig,
-          getWorkerFactory(sourceLauncherConfig, destinationLauncherConfig, jobRunConfig, syncInput),
-          inputSupplier,
-          new CancellationHandler.TemporalCancellationHandler());
+      final Predicate<StandardSyncOutput> succeededPredicate = output -> output.getStandardSyncSummary().getStatus() == Status.COMPLETED;
+
+      final BiFunction<StandardSyncInput, StandardSyncOutput, StandardSyncInput> nextInput = (input, lastOutput) -> {
+        final StandardSyncInput newInput = Jsons.clone(input);
+        newInput.setState(lastOutput.getState());
+        return newInput;
+      };
+
+      final PartialSuccessTemporalAttemptExecution<StandardSyncInput, StandardSyncOutput> temporalAttemptExecution =
+          new PartialSuccessTemporalAttemptExecution<>(
+              workspaceRoot,
+              jobRunConfig,
+              getWorkerFactory(sourceLauncherConfig, destinationLauncherConfig, jobRunConfig, syncInput),
+              inputSupplier,
+              new CancellationHandler.TemporalCancellationHandler(),
+              succeededPredicate,
+              nextInput,
+              MAX_RETRIES);
 
       return temporalAttemptExecution.get();
     }

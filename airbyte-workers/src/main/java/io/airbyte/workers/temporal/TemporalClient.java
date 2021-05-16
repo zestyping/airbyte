@@ -39,13 +39,9 @@ import io.airbyte.protocol.models.ConnectorSpecification;
 import io.airbyte.scheduler.models.IntegrationLauncherConfig;
 import io.airbyte.scheduler.models.JobRunConfig;
 import io.airbyte.workers.WorkerUtils;
-import io.temporal.api.common.v1.WorkflowExecution;
 import io.temporal.client.WorkflowClient;
-import io.temporal.client.WorkflowStub;
 import java.nio.file.Path;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 public class TemporalClient {
@@ -120,50 +116,16 @@ public class TemporalClient {
         .withCatalog(config.getConfiguredAirbyteCatalog())
         .withState(config.getState());
 
-    final SyncWorkflow workflowStub = getWorkflowStub(SyncWorkflow.class, TemporalJobType.SYNC);
-    final WorkflowExecution start = WorkflowClient.start(workflowStub::run,
-        jobRunConfig,
-        sourceLauncherConfig,
-        destinationLauncherConfig,
-        input);
-
-    WorkflowStub untyped = WorkflowStub.fromTyped(workflowStub);
-    try {
-      StandardSyncOutput result = untyped.getResult(10, TimeUnit.SECONDS, StandardSyncOutput.class);
-      final JobMetadata metadata = new JobMetadata(true, Path.of(""));
-      return new TemporalResponse<>(result, metadata);
-    } catch (TimeoutException e) {
-      throw new RuntimeException(e);
-    }
-
-    // return execute(jobRunConfig,
-    // () -> getWorkflowStub(SyncWorkflow.class, TemporalJobType.SYNC).run(
-    // jobRunConfig,
-    // sourceLauncherConfig,
-    // destinationLauncherConfig,
-    // input));
+    return execute(jobRunConfig,
+        () -> getWorkflowStub(SyncWorkflow.class, TemporalJobType.SYNC).run(
+            jobRunConfig,
+            sourceLauncherConfig,
+            destinationLauncherConfig,
+            input));
   }
 
   private <T> T getWorkflowStub(Class<T> workflowClass, TemporalJobType jobType) {
     return client.newWorkflowStub(workflowClass, TemporalUtils.getWorkflowOptions(jobType));
-  }
-
-  @VisibleForTesting
-  <T> TemporalResponse<T> execute2(JobRunConfig jobRunConfig, Supplier<T> executor) {
-    final Path jobRoot = WorkerUtils.getJobRoot(workspaceRoot, jobRunConfig);
-    final Path logPath = WorkerUtils.getLogPath(jobRoot);
-
-    T operationOutput = null;
-    RuntimeException exception = null;
-
-    try {
-      operationOutput = executor.get();
-    } catch (RuntimeException e) {
-      exception = e;
-    }
-
-    final JobMetadata metadata = new JobMetadata(exception == null, logPath);
-    return new TemporalResponse<>(operationOutput, metadata);
   }
 
   @VisibleForTesting
