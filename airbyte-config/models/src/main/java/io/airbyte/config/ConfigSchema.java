@@ -51,6 +51,7 @@ public enum ConfigSchema {
   NORMALIZATION_INPUT("NormalizationInput.yaml"),
 
   STANDARD_SYNC_OUTPUT("StandardSyncOutput.yaml"),
+  REPLICATION_OUTPUT("ReplicationOutput.yaml"),
 
   STATE("State.yaml");
 

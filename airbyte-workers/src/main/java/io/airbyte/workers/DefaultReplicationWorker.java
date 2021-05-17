@@ -24,12 +24,10 @@
 
 package io.airbyte.workers;
 
-import static java.lang.Thread.sleep;
-
+import io.airbyte.config.ReplicationAttemptSummary;
+import io.airbyte.config.ReplicationOutput;
 import io.airbyte.config.StandardSyncInput;
-import io.airbyte.config.StandardSyncOutput;
-import io.airbyte.config.StandardSyncSummary;
-import io.airbyte.config.StandardSyncSummary.Status;
+import io.airbyte.config.StandardSyncSummary.ReplicationStatus;
 import io.airbyte.config.StandardTapConfig;
 import io.airbyte.config.StandardTargetConfig;
 import io.airbyte.config.State;
@@ -40,6 +38,9 @@ import io.airbyte.workers.protocols.MessageTracker;
 import io.airbyte.workers.protocols.Source;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -83,8 +84,9 @@ public class DefaultReplicationWorker implements ReplicationWorker {
     this.hasFailed = new AtomicBoolean(false);
   }
 
+  @SuppressWarnings("OptionalIsPresent")
   @Override
-  public StandardSyncOutput run(StandardSyncInput syncInput, Path jobRoot) throws WorkerException {
+  public ReplicationOutput run(StandardSyncInput syncInput, Path jobRoot) throws WorkerException {
     LOGGER.info("start sync worker. job id: {} attempt id: {}", jobId, attempt);
 
     // todo (cgardens) - this should not be happening in the worker. this is configuration information
@@ -99,6 +101,8 @@ public class DefaultReplicationWorker implements ReplicationWorker {
           .collect(Collectors.toMap(s -> s.getStream().getNamespace() + "." + s.getStream().getName(),
               s -> String.format("%s - %s", s.getSyncMode(), s.getDestinationSyncMode()))));
       final StandardTapConfig sourceConfig = WorkerUtils.syncToTapConfig(syncInput);
+
+      final ExecutorService executorService = Executors.newFixedThreadPool(2);
 
       // note: resources are closed in the opposite order in which they are declared. thus source will be
       // closed first (which is what we want).
@@ -130,8 +134,6 @@ public class DefaultReplicationWorker implements ReplicationWorker {
               final Optional<AirbyteMessage> messageOptional = destination.attemptRead();
               if (messageOptional.isPresent()) {
                 destinationMessageTracker.accept(messageOptional.get());
-              } else {
-                sleep(100);
               }
             }
           } catch (Exception e) {
@@ -140,23 +142,27 @@ public class DefaultReplicationWorker implements ReplicationWorker {
           }
         });
 
-        sourceThread.start();
-        destinationThread.start();
+        final Future<?> sourceThreadExecution = executorService.submit(sourceThread);
+        final Future<?> destinationThreadExecution = executorService.submit(destinationThread);
 
         LOGGER.info("Waiting for source thread to join.");
-        sourceThread.join();
+        sourceThreadExecution.get();
         LOGGER.info("Source thread complete.");
         LOGGER.info("Waiting for destination thread to join.");
-        destinationThread.join();
+        destinationThreadExecution.get();
         LOGGER.info("Destination thread complete.");
 
       } catch (Exception e) {
         hasFailed.set(true);
         LOGGER.error("Sync worker failed.", e);
+      } finally {
+        executorService.shutdownNow();
       }
 
-      final StandardSyncSummary summary = new StandardSyncSummary()
-          .withStatus(hasFailed.get() || cancelled.get() ? Status.FAILED : Status.COMPLETED)
+      final ReplicationStatus outputStatus =
+          cancelled.get() ? ReplicationStatus.CANCELLED : hasFailed.get() ? ReplicationStatus.FAILED : ReplicationStatus.COMPLETED;
+      final ReplicationAttemptSummary summary = new ReplicationAttemptSummary()
+          .withStatus(outputStatus)
           .withRecordsSynced(sourceMessageTracker.getRecordCount())
           .withBytesSynced(sourceMessageTracker.getBytesCount())
           .withStartTime(startTime)
@@ -164,8 +170,8 @@ public class DefaultReplicationWorker implements ReplicationWorker {
 
       LOGGER.info("sync summary: {}", summary);
 
-      final StandardSyncOutput output = new StandardSyncOutput()
-          .withStandardSyncSummary(summary)
+      final ReplicationOutput output = new ReplicationOutput()
+          .withReplicationAttemptSummary(summary)
           .withOutputCatalog(destinationConfig.getCatalog());
 
       if (destinationMessageTracker.getOutputState().isPresent()) {

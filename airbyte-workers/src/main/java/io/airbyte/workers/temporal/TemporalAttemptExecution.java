@@ -55,18 +55,18 @@ import org.slf4j.LoggerFactory;
 public class TemporalAttemptExecution<INPUT, OUTPUT> implements Supplier<OUTPUT> {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(TemporalAttemptExecution.class);
-  private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(10);
 
+  private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(10);
   public static String WORKFLOW_ID_FILENAME = "WORKFLOW_ID";
 
-  protected final Path jobRoot;
-  protected final CheckedSupplier<Worker<INPUT, OUTPUT>, Exception> workerSupplier;
-  protected final Supplier<INPUT> inputSupplier;
-  protected final String jobId;
-  protected final BiConsumer<Path, String> mdcSetter;
-  protected final CheckedConsumer<Path, IOException> jobRootDirCreator;
-  protected final CancellationHandler cancellationHandler;
-  protected final Supplier<String> workflowIdProvider;
+  private final Path jobRoot;
+  private final CheckedSupplier<Worker<INPUT, OUTPUT>, Exception> workerSupplier;
+  private final Supplier<INPUT> inputSupplier;
+  private final String jobId;
+  private final BiConsumer<Path, String> mdcSetter;
+  private final CheckedConsumer<Path, IOException> jobRootDirCreator;
+  private final CancellationHandler cancellationHandler;
+  private final Supplier<String> workflowIdProvider;
 
   public TemporalAttemptExecution(Path workspaceRoot,
                                   JobRunConfig jobRunConfig,
@@ -139,7 +139,7 @@ public class TemporalAttemptExecution<INPUT, OUTPUT> implements Supplier<OUTPUT>
     }
   }
 
-  protected Thread getWorkerThread(Worker<INPUT, OUTPUT> worker, CompletableFuture<OUTPUT> outputFuture) {
+  private Thread getWorkerThread(Worker<INPUT, OUTPUT> worker, CompletableFuture<OUTPUT> outputFuture) {
     return new Thread(() -> {
       mdcSetter.accept(jobRoot, jobId);
 

@@ -40,11 +40,11 @@ import com.google.common.collect.ImmutableMap;
 import io.airbyte.commons.json.Jsons;
 import io.airbyte.commons.string.Strings;
 import io.airbyte.config.ConfigSchema;
+import io.airbyte.config.ReplicationAttemptSummary;
+import io.airbyte.config.ReplicationOutput;
 import io.airbyte.config.StandardSync;
 import io.airbyte.config.StandardSyncInput;
-import io.airbyte.config.StandardSyncOutput;
-import io.airbyte.config.StandardSyncSummary;
-import io.airbyte.config.StandardSyncSummary.Status;
+import io.airbyte.config.StandardSyncSummary.ReplicationStatus;
 import io.airbyte.config.StandardTapConfig;
 import io.airbyte.config.StandardTargetConfig;
 import io.airbyte.config.State;
@@ -142,7 +142,7 @@ class DefaultReplicationWorkerTest {
   @SuppressWarnings({"BusyWait"})
   @Test
   void testCancellation() throws InterruptedException {
-    final AtomicReference<StandardSyncOutput> output = new AtomicReference<>();
+    final AtomicReference<ReplicationOutput> output = new AtomicReference<>();
     when(source.isFinished()).thenReturn(false);
     when(destinationMessageTracker.getOutputState()).thenReturn(Optional.ofNullable(STATE_MESSAGE.getState().getData()));
 
@@ -196,9 +196,9 @@ class DefaultReplicationWorkerTest {
         sourceMessageTracker,
         destinationMessageTracker);
 
-    final StandardSyncOutput output = worker.run(syncInput, jobRoot);
-    assertNotNull(output);
-    assertEquals(output.getState().getState(), STATE_MESSAGE.getState().getData());
+    final ReplicationOutput actual = worker.run(syncInput, jobRoot);
+    assertNotNull(actual);
+    assertEquals(actual.getState().getState(), STATE_MESSAGE.getState().getData());
   }
 
   @Test
@@ -214,9 +214,9 @@ class DefaultReplicationWorkerTest {
         sourceMessageTracker,
         destinationMessageTracker);
 
-    final StandardSyncOutput output = worker.run(syncInput, jobRoot);
-    assertNotNull(output);
-    assertNull(output.getState());
+    final ReplicationOutput actual = worker.run(syncInput, jobRoot);
+    assertNotNull(actual);
+    assertNull(actual.getState());
   }
 
   @Test
@@ -249,29 +249,29 @@ class DefaultReplicationWorkerTest {
         sourceMessageTracker,
         destinationMessageTracker);
 
-    final StandardSyncOutput actual = worker.run(syncInput, jobRoot);
-    final StandardSyncOutput expectedSyncOutput = new StandardSyncOutput()
-        .withStandardSyncSummary(new StandardSyncSummary()
+    final ReplicationOutput actual = worker.run(syncInput, jobRoot);
+    final ReplicationOutput replicationOutput = new ReplicationOutput()
+        .withReplicationAttemptSummary(new ReplicationAttemptSummary()
             .withRecordsSynced(12L)
             .withBytesSynced(100L)
-            .withStatus(Status.COMPLETED))
+            .withStatus(ReplicationStatus.COMPLETED))
         .withOutputCatalog(syncInput.getCatalog())
         .withState(new State().withState(expectedState));
 
     // good enough to verify that times are present.
-    assertNotNull(actual.getStandardSyncSummary().getStartTime());
-    assertNotNull(actual.getStandardSyncSummary().getEndTime());
+    assertNotNull(actual.getReplicationAttemptSummary().getStartTime());
+    assertNotNull(actual.getReplicationAttemptSummary().getEndTime());
 
     // verify output object matches declared json schema spec.
     final Set<String> validate = new JsonSchemaValidator()
-        .validate(Jsons.jsonNode(Jsons.jsonNode(JsonSchemaValidator.getSchema(ConfigSchema.STANDARD_SYNC_OUTPUT.getFile()))), Jsons.jsonNode(actual));
+        .validate(Jsons.jsonNode(Jsons.jsonNode(JsonSchemaValidator.getSchema(ConfigSchema.REPLICATION_OUTPUT.getFile()))), Jsons.jsonNode(actual));
     assertTrue(validate.isEmpty(), "Validation errors: " + Strings.join(validate, ","));
 
     // remove times so we can do the rest of the object <> object comparison.
-    actual.getStandardSyncSummary().withStartTime(null);
-    actual.getStandardSyncSummary().withEndTime(null);
+    actual.getReplicationAttemptSummary().withStartTime(null);
+    actual.getReplicationAttemptSummary().withEndTime(null);
 
-    assertEquals(expectedSyncOutput, actual);
+    assertEquals(replicationOutput, actual);
   }
 
 }

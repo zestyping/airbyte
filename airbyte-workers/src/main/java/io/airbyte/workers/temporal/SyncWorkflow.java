@@ -27,12 +27,16 @@ package io.airbyte.workers.temporal;
 import com.google.common.annotations.VisibleForTesting;
 import io.airbyte.commons.functional.CheckedSupplier;
 import io.airbyte.commons.json.Jsons;
+import io.airbyte.commons.util.MoreLists;
 import io.airbyte.config.AirbyteConfigValidator;
 import io.airbyte.config.ConfigSchema;
 import io.airbyte.config.NormalizationInput;
+import io.airbyte.config.ReplicationAttemptSummary;
+import io.airbyte.config.ReplicationOutput;
 import io.airbyte.config.StandardSyncInput;
 import io.airbyte.config.StandardSyncOutput;
-import io.airbyte.config.StandardSyncSummary.Status;
+import io.airbyte.config.StandardSyncSummary;
+import io.airbyte.config.StandardSyncSummary.ReplicationStatus;
 import io.airbyte.scheduler.models.IntegrationLauncherConfig;
 import io.airbyte.scheduler.models.JobRunConfig;
 import io.airbyte.workers.DefaultNormalizationWorker;
@@ -58,6 +62,7 @@ import io.temporal.workflow.WorkflowInterface;
 import io.temporal.workflow.WorkflowMethod;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -146,33 +151,61 @@ public interface SyncWorkflow {
         return syncInput;
       };
 
-      final Predicate<StandardSyncOutput> succeededPredicate = output -> output.getStandardSyncSummary().getStatus() == Status.COMPLETED;
+      final Predicate<ReplicationOutput> shouldAttemptAgain =
+          output -> output.getReplicationAttemptSummary().getStatus() != ReplicationStatus.COMPLETED;
 
-      final BiFunction<StandardSyncInput, StandardSyncOutput, StandardSyncInput> nextInput = (input, lastOutput) -> {
+      final BiFunction<StandardSyncInput, ReplicationOutput, StandardSyncInput> nextAttemptInput = (input, lastOutput) -> {
         final StandardSyncInput newInput = Jsons.clone(input);
         newInput.setState(lastOutput.getState());
         return newInput;
       };
 
-      final PartialSuccessTemporalAttemptExecution<StandardSyncInput, StandardSyncOutput> temporalAttemptExecution =
+      final PartialSuccessTemporalAttemptExecution<StandardSyncInput, ReplicationOutput> temporalAttemptExecution =
           new PartialSuccessTemporalAttemptExecution<>(
               workspaceRoot,
               jobRunConfig,
               getWorkerFactory(sourceLauncherConfig, destinationLauncherConfig, jobRunConfig, syncInput),
               inputSupplier,
               new CancellationHandler.TemporalCancellationHandler(),
-              succeededPredicate,
-              nextInput,
+              shouldAttemptAgain,
+              nextAttemptInput,
               MAX_RETRIES);
 
-      return temporalAttemptExecution.get();
+      // aggregate each attempts output into a sync summary.
+      // todo (cgardens) - this operation is lossy (we lose the ability to see the amount of data
+      // replicated by each attempt). likely in the future, we will want to retain this info and surface
+      // it.
+      final List<ReplicationOutput> attemptOutputs = temporalAttemptExecution.get();
+      final long totalBytesReplicated = attemptOutputs
+          .stream()
+          .map(ReplicationOutput::getReplicationAttemptSummary)
+          .mapToLong(ReplicationAttemptSummary::getBytesSynced).sum();
+      final long totalRecordsReplicated = attemptOutputs
+          .stream()
+          .map(ReplicationOutput::getReplicationAttemptSummary)
+          .mapToLong(ReplicationAttemptSummary::getRecordsSynced).sum();
+      final StandardSyncSummary syncSummary = new StandardSyncSummary();
+      syncSummary.setBytesSynced(totalBytesReplicated);
+      syncSummary.setRecordsSynced(totalRecordsReplicated);
+      syncSummary.setStartTime(attemptOutputs.get(0).getReplicationAttemptSummary().getStartTime());
+      syncSummary.setEndTime(MoreLists.last(attemptOutputs).orElseThrow().getReplicationAttemptSummary().getEndTime());
+      syncSummary.setStatus(MoreLists.last(attemptOutputs).orElseThrow().getReplicationAttemptSummary().getStatus());
+
+      final StandardSyncOutput standardSyncOutput = new StandardSyncOutput();
+      standardSyncOutput.setState(MoreLists.last(attemptOutputs).orElseThrow().getState());
+      standardSyncOutput.setOutputCatalog(MoreLists.last(attemptOutputs).orElseThrow().getOutputCatalog());
+
+      LOGGER.info("attempt summaries: {}", attemptOutputs);
+      LOGGER.info("sync summary: {}", standardSyncOutput);
+
+      return standardSyncOutput;
     }
 
-    private CheckedSupplier<Worker<StandardSyncInput, StandardSyncOutput>, Exception> getWorkerFactory(
-                                                                                                       IntegrationLauncherConfig sourceLauncherConfig,
-                                                                                                       IntegrationLauncherConfig destinationLauncherConfig,
-                                                                                                       JobRunConfig jobRunConfig,
-                                                                                                       StandardSyncInput syncInput) {
+    private CheckedSupplier<Worker<StandardSyncInput, ReplicationOutput>, Exception> getWorkerFactory(
+                                                                                                      IntegrationLauncherConfig sourceLauncherConfig,
+                                                                                                      IntegrationLauncherConfig destinationLauncherConfig,
+                                                                                                      JobRunConfig jobRunConfig,
+                                                                                                      StandardSyncInput syncInput) {
       return () -> {
         final IntegrationLauncher sourceLauncher = new AirbyteIntegrationLauncher(
             sourceLauncherConfig.getJobId(),

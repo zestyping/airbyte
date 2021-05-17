@@ -41,6 +41,7 @@ import io.temporal.internal.common.CheckedExceptionWrapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
@@ -62,7 +63,7 @@ class PartialSuccessTemporalAttemptExecutionTest {
   private CheckedSupplier<Worker<String, String>, Exception> execution;
   private Supplier<String> inputSupplier;
   private BiConsumer<Path, String> mdcSetter;
-  private Predicate<String> succeededPredicate;
+  private Predicate<String> shouldAttemptAgain;
   private BiFunction<String, String, String> nextInput;
 
   private PartialSuccessTemporalAttemptExecution<String, String> attemptExecution;
@@ -76,7 +77,7 @@ class PartialSuccessTemporalAttemptExecutionTest {
     execution = mock(CheckedSupplier.class);
     inputSupplier = mock(Supplier.class);
     mdcSetter = mock(BiConsumer.class);
-    succeededPredicate = mock(Predicate.class);
+    shouldAttemptAgain = mock(Predicate.class);
     nextInput = mock(BiFunction.class);
     final CheckedConsumer<Path, IOException> jobRootDirCreator = Files::createDirectories;
 
@@ -88,7 +89,7 @@ class PartialSuccessTemporalAttemptExecutionTest {
         jobRootDirCreator,
         mock(CancellationHandler.class),
         () -> "workflow_id",
-        succeededPredicate,
+        shouldAttemptAgain,
         nextInput,
         MAX_RETRIES);
   }
@@ -99,13 +100,13 @@ class PartialSuccessTemporalAttemptExecutionTest {
     final String expected = "louis XVI";
     final Worker<String, String> worker = mock(Worker.class);
     when(worker.run(eq(INPUT), any())).thenReturn(expected);
-    when(succeededPredicate.test(expected)).thenReturn(true);
+    when(shouldAttemptAgain.test(expected)).thenReturn(false);
     when(inputSupplier.get()).thenReturn(INPUT);
     when(execution.get()).thenAnswer((Answer<Worker<String, String>>) invocation -> worker);
 
-    final String actual = attemptExecution.get();
+    final List<String> actual = attemptExecution.get();
 
-    assertEquals(expected, actual);
+    assertEquals(List.of(expected), actual);
 
     verify(execution).get();
     verify(worker).run(eq(INPUT), any());
@@ -115,18 +116,44 @@ class PartialSuccessTemporalAttemptExecutionTest {
   @SuppressWarnings("unchecked")
   @Test
   void testSuccessfulSupplierRunMultipleAttempts() throws Exception {
-    final String expected = "louis XVI";
+    final List<String> expected = List.of("louis XVI", "louis XVII");
     final Worker<String, String> worker = mock(Worker.class);
-    when(worker.run(eq(INPUT), any())).thenReturn(expected);
-    when(worker.run(eq(INPUT + "I"), any())).thenReturn(expected);
-    when(worker.run(eq(INPUT + "II"), any())).thenReturn(expected);
-    when(succeededPredicate.test(expected)).thenReturn(false);
+    when(worker.run(eq(INPUT), any())).thenReturn(expected.get(0));
+    when(worker.run(eq(INPUT + "I"), any())).thenReturn(expected.get(1));
+    when(shouldAttemptAgain.test(expected.get(0))).thenReturn(true);
+    when(shouldAttemptAgain.test(expected.get(1))).thenReturn(false);
     when(inputSupplier.get()).thenReturn(INPUT);
     when(nextInput.apply(any(), any())).thenAnswer(a -> a.getArguments()[0] + "I");
 
     when(execution.get()).thenAnswer((Answer<Worker<String, String>>) invocation -> worker);
 
-    final String actual = attemptExecution.get();
+    final List<String> actual = attemptExecution.get();
+
+    assertEquals(expected, actual);
+
+    verify(execution).get();
+    verify(worker).run(eq(INPUT), any());
+    verify(worker).run(eq(INPUT + "I"), any());
+    verify(mdcSetter, atLeast(2)).accept(jobRoot, JOB_ID);
+  }
+
+  @SuppressWarnings("unchecked")
+  @Test
+  void testExceedsMaxAttempts() throws Exception {
+    final List<String> expected = List.of("louis XVI", "louis XVII", "louis XVIII");
+    final Worker<String, String> worker = mock(Worker.class);
+    when(worker.run(eq(INPUT), any())).thenReturn(expected.get(0));
+    when(worker.run(eq(INPUT + "I"), any())).thenReturn(expected.get(1));
+    when(worker.run(eq(INPUT + "II"), any())).thenReturn(expected.get(2));
+    when(shouldAttemptAgain.test(expected.get(0))).thenReturn(true);
+    when(shouldAttemptAgain.test(expected.get(1))).thenReturn(true);
+    when(shouldAttemptAgain.test(expected.get(2))).thenReturn(true);
+    when(inputSupplier.get()).thenReturn(INPUT);
+    when(nextInput.apply(any(), any())).thenAnswer(a -> a.getArguments()[0] + "I");
+
+    when(execution.get()).thenAnswer((Answer<Worker<String, String>>) invocation -> worker);
+
+    final List<String> actual = attemptExecution.get();
 
     assertEquals(expected, actual);
 
