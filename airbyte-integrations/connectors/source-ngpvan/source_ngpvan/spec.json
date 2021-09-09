@@ -1,0 +1,26 @@
+{
+  "documentationUrl": "https://docsurl.com",
+  "connectionSpecification": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "NGPVAN Source Spec",
+    "type": "object",
+    "required": ["van_api_key", "database_mode"],
+    "additionalProperties": false,
+    "properties": {
+      "van_api_key": {
+        "title": "VAN API key",
+        "description": "VAN API key, in UUID form",
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "examples": ["20739fba-c141-8fca-30ef-6c167de5aa42"]
+      },
+      "database_mode": {
+        "title": "Database mode",
+        "description": "0 (for My Voters) or 1 (for My Campaigns)",
+        "type": "integer",
+        "pattern": "^[01]$",
+        "examples": ["0", "1"]
+      }
+    }
+  }
+}
