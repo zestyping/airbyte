@@ -84,26 +84,29 @@ class EmailMessages(NgpvanStream):
                 'dateModified': DATETIME_TYPE,
                 'campaignID': INTEGER_TYPE,
                 'emailMessageContent': {
-                    'type': ['null', 'object'],
-                    'properties': {
-                        'name': STRING_TYPE,
-                        'senderDisplayName': STRING_TYPE,
-                        'senderEmailAddress': STRING_TYPE,
-                        'createdBy': STRING_TYPE,
-                        'subject': STRING_TYPE,
-                        'dateCreated': DATETIME_TYPE,
-                        'emailMessageContentDistributions': {
-                            'type': ['null', 'object'],
-                            'properties': {
-                                'dateSent': DATETIME_TYPE,
-                                'recipientCount': INTEGER_TYPE,
-                                'openCount': INTEGER_TYPE,
-                                'linksClickedCount': INTEGER_TYPE,
-                                'unsubscribeCount': INTEGER_TYPE,
-                                'bounceCount': INTEGER_TYPE,
-                                'contributionTotal': NUMBER_TYPE,
-                                'formSubmissionCount': INTEGER_TYPE,
-                                'contributionCount': INTEGER_TYPE
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'name': STRING_TYPE,
+                            'senderDisplayName': STRING_TYPE,
+                            'senderEmailAddress': STRING_TYPE,
+                            'createdBy': STRING_TYPE,
+                            'subject': STRING_TYPE,
+                            'dateCreated': DATETIME_TYPE,
+                            'emailMessageContentDistributions': {
+                                'type': ['null', 'object'],
+                                'properties': {
+                                    'dateSent': DATETIME_TYPE,
+                                    'recipientCount': INTEGER_TYPE,
+                                    'openCount': INTEGER_TYPE,
+                                    'linksClickedCount': INTEGER_TYPE,
+                                    'unsubscribeCount': INTEGER_TYPE,
+                                    'bounceCount': INTEGER_TYPE,
+                                    'contributionTotal': NUMBER_TYPE,
+                                    'formSubmissionCount': INTEGER_TYPE,
+                                    'contributionCount': INTEGER_TYPE
+                                }
                             }
                         }
                     }
