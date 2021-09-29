@@ -90,6 +90,7 @@ class EmailMessages(NgpvanStream):
                         'senderDisplayName': STRING_TYPE,
                         'senderEmailAddress': STRING_TYPE,
                         'createdBy': STRING_TYPE,
+                        'subject': STRING_TYPE,
                         'dateCreated': DATETIME_TYPE,
                         'emailMessageContentDistributions': {
                             'type': ['null', 'object'],
